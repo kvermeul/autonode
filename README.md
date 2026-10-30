@@ -50,20 +50,10 @@ from their published images — no extra repositories or build steps required:
 
 ### Configuration
 
-Add the following to your `env.local`:
-
-```bash
-# API key for the reverse traceroute gRPC API (obtain from the revtr team).
-REVTR_API_KEY=
-
-# Hostname and port of the reverse traceroute API server.
-REVTR_HOSTNAME=revtr.ccs.neu.edu
-REVTR_GRPC_PORT=9999
-
-# Sampling rate: 1 out of every N NDT connections triggers a reverse traceroute.
-# Use 1 to trigger on every connection.
-REVTR_SAMPLING=1
-```
+The reverse traceroute services need no configuration in your env file. The
+API key for the reverse traceroute API is provided by M-Lab and read by
+revtr-sidecar from `./autonode/revtr-api-key`, next to the other files that
+`register-node` writes to `./autonode`.
 
 Place a `plvp.config` file in `./revtrvp/plvp.config` (relative to this
 directory). Minimal example:
@@ -78,21 +68,16 @@ scamper:
     port: 4381
 ```
 
-### ICMP identifier partitioning (optional)
+### ICMP identifier partitioning
 
-When revtrvp and traceroute-caller run on the same host they both spawn scamper
-instances that share the host network namespace. To prevent them from picking the
-same ICMP identifier, build the patched scamper binary and configure the ID space
-partitioning in `env.local`:
+revtrvp and traceroute-caller both run scamper in the host network namespace.
+If two scamper instances use the same ICMP identifier, echo replies can be
+delivered to the wrong instance. The two never overlap:
 
-```bash
-# Use the patched binary built from the scamper ICMP-ID partitioning patch.
-SCAMPER_BIN=/usr/local/bin/scamper-anticollision
+| Service           | ICMP identifiers  | Why                                                                                               |
+|-------------------|-------------------|---------------------------------------------------------------------------------------------------|
+| revtrvp           | `[0, 32768)`      | `SCAMPER_ICMP_ID_BASE=0` / `SCAMPER_ICMP_ID_RANGE=32768`, read by the patched scamper in its image |
+| traceroute-caller | `[32768, 65536)`  | stock scamper sets bit `0x8000` on the identifier for `tracelb -P icmp-echo` (MDA mode)           |
 
-# traceroute-caller takes the upper half of the ID space; revtrvp takes the lower.
-SCAMPER_ICMP_ID_BASE=32768
-SCAMPER_ICMP_ID_RANGE=32768
-```
-
-Without this, both instances use the default `getpid() & 0xffff` identifier
-selection, which may result in occasional ICMP probe collisions.
+In its default mode (`-scamper.trace-type=regular`) traceroute-caller sends
+UDP probes, which do not use an ICMP identifier at all.

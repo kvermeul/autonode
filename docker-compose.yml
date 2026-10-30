@@ -248,8 +248,6 @@ services:
       - ./resultsdir:/resultsdir
       - ./schemas:/schemas
       - ./metadata:/metadata
-      # Mount the host scamper binary; select it via SCAMPER_BIN in the env file.
-      - /usr/local/bin/scamper:/usr/local/bin/scamper-anticollision:ro
     depends_on:
       generate-schemas-traceroute:
         condition: service_completed_successfully
@@ -257,11 +255,6 @@ services:
         condition: service_healthy
       ndt-server:
         condition: service_healthy
-    environment:
-      # Partition the ICMP identifier space so traceroute-caller's scamper
-      # does not collide with revtrvp's scamper (see SCAMPER_ICMP_ID_* in env).
-      - SCAMPER_ICMP_ID_BASE=${SCAMPER_ICMP_ID_BASE:-}
-      - SCAMPER_ICMP_ID_RANGE=${SCAMPER_ICMP_ID_RANGE:-}
     pull_policy: always
     restart: always
     configs:
@@ -283,7 +276,6 @@ services:
       - -anonymize.ip=none
       - -scamper.trace-type=regular
       - -output.format=json
-      - -scamper.bin=${SCAMPER_BIN}
 
   node-exporter:
     image: quay.io/prometheus/node-exporter:v1.9.0
@@ -361,7 +353,8 @@ services:
   # revtr-sidecar watches completed NDT connections and asks the revtr controller
   # to run a reverse traceroute from each client back to this node.
   #
-  # Both services require REVTR_* variables to be set in the env file.
+  # Neither service needs configuration from the site host: the revtr API key
+  # is delivered by register-node to ./autonode/revtr-api-key.
   revtrvp:
     image: ghcr.io/neu-sns/revtrvp:latest
     profiles: [revtr]
@@ -374,8 +367,9 @@ services:
     volumes:
       - ./revtrvp/plvp.config:/plvp.config:ro
     environment:
-      # Allocate the lower half of the ICMP identifier space [0, 32768) to
-      # revtrvp's scamper; traceroute-caller takes the upper half (see env).
+      # Confine revtrvp's scamper to the lower half of the ICMP identifier
+      # space [0, 32768). traceroute-caller's scamper only uses ICMP IDs in the
+      # upper half (see README, "ICMP identifier partitioning").
       - SCAMPER_ICMP_ID_BASE=0
       - SCAMPER_ICMP_ID_RANGE=32768
     command: ["/server.crt", "/plvp.config", "-loglevel", "info"]
@@ -390,17 +384,20 @@ services:
     network_mode: "service:ndt-server"
     volumes:
       - ./schemas/events.sock:/schemas/events.sock:ro
+      - ./autonode:/autonode:ro
     environment:
-      # flagx.ArgsFromEnv maps flag names to env vars: revtr.APIKey→REVTR_APIKEY,
-      # revtr.hostname→REVTR_HOSTNAME, revtr.grpcPort→REVTR_GRPCPORT,
-      # revtr.sampling→REVTR_SAMPLING, tcpinfo.eventsocket→TCPINFO_EVENTSOCKET.
-      - REVTR_HOSTNAME=${REVTR_HOSTNAME}
-      - REVTR_APIKEY=${REVTR_API_KEY}
-      - REVTR_GRPCPORT=${REVTR_GRPC_PORT}
-      - REVTR_SAMPLING=${REVTR_SAMPLING:-1}
+      # flagx.ArgsFromEnv maps flag names to env vars, e.g.
+      # revtr.APIKeyFile→REVTR_APIKEYFILE, revtr.grpcPort→REVTR_GRPCPORT.
+      - REVTR_HOSTNAME=revtr.ccs.neu.edu
+      - REVTR_GRPCPORT=9999
+      - REVTR_APIKEYFILE=/autonode/revtr-api-key
+      # TODO: deliver the sampling rate through the register API.
+      - REVTR_SAMPLING=1
       - TCPINFO_EVENTSOCKET=/schemas/events.sock
     depends_on:
       ndt-server:
+        condition: service_healthy
+      register-node:
         condition: service_healthy
       revtrvp:
         condition: service_started
