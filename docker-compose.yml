@@ -355,9 +355,13 @@ services:
   #
   # Neither service needs configuration from the site host: the revtr API key
   # is delivered by register-node to ./autonode/revtr-api-key.
+  #
+  # TODO: the images below are development builds of the NEU-SNS branches for
+  # this change; switch to release tags before merging.
   revtrvp:
-    image: ghcr.io/neu-sns/revtrvp:latest
+    image: ghcr.io/neu-sns/revtrvp:feat-scamper-icmp-id-partitioning
     profiles: [revtr]
+    pull_policy: always
     restart: unless-stopped
     # Share ndt-server's network namespace so revtrvp listens on the same public
     # IP that clients used for the speedtest.
@@ -378,8 +382,9 @@ services:
         condition: service_healthy
 
   revtr-sidecar:
-    image: ghcr.io/neu-sns/revtr-sidecar:latest
+    image: ghcr.io/neu-sns/revtr-sidecar:feat-autonode-support
     profiles: [revtr]
+    pull_policy: always
     restart: unless-stopped
     network_mode: "service:ndt-server"
     volumes:
